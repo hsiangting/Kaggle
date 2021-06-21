@@ -1,0 +1,245 @@
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from scipy.stats import iqr
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_squared_log_error, r2_score, accuracy_score, confusion_matrix
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.model_selection import GridSearchCV, KFold, cross_val_score
+from sklearn.feature_selection import SelectFpr, SelectKBest, f_regression, f_classif
+
+
+from sklearn.linear_model import LinearRegression, Lasso, ElasticNet, LogisticRegression
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+from sklearn.kernel_ridge import KernelRidge
+from sklearn.ensemble import RandomForestClassifier
+
+df=pd.read_csv('final-term.csv')
+
+df_nan=df.isna().sum()
+df_duplicated=df.duplicated().sum()
+
+cat_col=df.select_dtypes('O').columns
+print('-----------總共有{}個類別欄位-----------'.format(len(cat_col)))
+for col in cat_col:
+    print('有{}個不同的值在{}欄位中 : \n{}\n'.format(df[col].nunique(), col, df[col].unique()))
+
+le=LabelEncoder()
+yn_col=['default', 'housing', 'loan', 'y']
+for col in yn_col:
+    df[col]=le.fit_transform(df[col])
+
+
+
+data=pd.get_dummies(df)
+
+#把-1值變0
+data['pdays']=data['pdays'].apply(lambda x:1 if x==-1 else x+1)
+data['pdays']=data['pdays'].apply(lambda x:x-1)
+
+data.drop(['job_unknown'], axis=1, inplace=True)
+data.drop(['marital_divorced'], axis=1, inplace=True)
+data.drop(['education_unknown'], axis=1, inplace=True)
+data.drop(['contact_unknown'], axis=1, inplace=True)
+data.drop(['month_sep'], axis=1, inplace=True)
+data.drop(['poutcome_unknown'], axis=1, inplace=True)
+
+'''
+skew_col=['age', 'balance', 'duration', 'campaign', 'pdays', 'day']
+print(data[skew_col].skew().sort_values(ascending=False))
+sns.set_style('whitegrid')
+plt.figure(figsize=(18, 10))
+for i in range(6):
+    plt.subplot(2, 3, i+1)
+    sns.kdeplot(data[skew_col[i]])
+    plt.title(skew_col[i]+' Distribution')
+plt.show()
+'''
+'''
+corr=data.corr()
+highcorr_col=['duration', 'poutcome_success', 'housing', 'contact_cellular', 'month_mar', 'month_oct', 'pdays', 'month_may', 'previous', 'job_retired', 'job_student', 'month_dec']
+high_corr=abs(corr['y']).sort_values(ascending=False)[1:13]
+three_outlier=['duration', 'previous', 'pdays']
+plt.figure(figsize=(10, 4))
+for i in range(12):
+    plt.subplot(1, 3, i+1)
+    sns.scatterplot(y=data['y'], x=data[three_outlier[i]])
+    plt.title(three_outlier[i])
+'''
+#duration previous pdays
+
+dataframe=data.copy()
+
+dmin_iqr, dmax_iqr=data['duration'].quantile([0.001, 0.999])
+print('------duration欄位------\n最大值為: {0}\n最小值為: {1}\n四分位距最大值: {2:.2f}\n四分位距最小值: {3}'.format(data['duration'].max(), data['duration'].min(), dmax_iqr, dmin_iqr))
+pmin_iqr, pmax_iqr=data['previous'].quantile([0.001, 0.999])
+print('------previous欄位------\n最大值為: {0}\n最小值為: {1}\n四分位距最大值: {2:.2f}\n四分位距最小值: {3}'.format(data['previous'].max(), data['previous'].min(), pmax_iqr, pmin_iqr))
+pdmin_iqr, pdmax_iqr=data['pdays'].quantile([0.001, 0.999])
+print('-------pdays欄位--------\n最大值為: {0}\n最小值為: {1}\n四分位距最大值: {2:.2f}\n四分位距最小值: {3}'.format(data['pdays'].max(), data['pdays'].min(), pdmax_iqr, pdmin_iqr))
+
+d_index=data[data['duration']>dmax_iqr].index.to_list()
+p_index=data[data['previous']>pmax_iqr].index.to_list()
+pd_index=data[data['pdays']>pdmax_iqr].index.to_list()
+
+
+for index in pd_index:
+    if index==44089:
+        pd_index.remove(index)
+    if index==44822:
+        pd_index.remove(index)
+        
+data.drop(d_index, inplace=True)
+data.drop(p_index, inplace=True)
+data.drop(pd_index, inplace=True)
+
+
+
+
+
+y=data['y']
+X=data.drop(['y'], axis=1)
+
+#selector = SelectFpr(f_classif, alpha=0.005)
+selector = SelectKBest(f_classif, k=12)
+X_new = selector.fit_transform(X, y) 
+mask = selector.get_support()
+new_features = X.columns[mask]
+print (new_features)
+X_train, X_test, y_train, y_test=train_test_split(X_new, y, test_size=0.2, random_state=15)
+
+#DecisionTree RandomForest KNN LR
+
+#ax=sns.heatmap(data[new_features].corr(),vmin=-1,vmax=1,center=0,annot=True)
+
+models_before={'SVM':SVC(), 
+               'LR':make_pipeline(StandardScaler(), LogisticRegression()), 
+               'NB':GaussianNB(), 
+               'RF':RandomForestClassifier(),
+               'DT':DecisionTreeClassifier(),
+               'KNN':KNeighborsClassifier()}
+print('調參前:\n')
+for name in models_before:
+    model_before=models_before[name].fit(X_train, y_train)
+    y_pred=model_before.predict(X_test)
+    acc_rate=accuracy_score(y_test, y_pred)
+    mae=mean_absolute_error(y_test, y_pred)
+    mse=mean_squared_error(y_test, y_pred)
+    cm=confusion_matrix(y_test, y_pred)
+    print('\n=================={}==================='.format(name))
+    print('Accuracy Rate: ', acc_rate)
+    print('MAE: ', mae)
+    print('MSE: ', mse)
+    print('Confusion Matrix : \n', cm)
+    
+    
+models={'SVM':make_pipeline(StandardScaler(), SVC()), 
+        'LR':make_pipeline(StandardScaler(), LogisticRegression(max_iter= 200, multi_class= 'ovr', solver= 'lbfgs')), 
+        'NB':GaussianNB(), 
+        'RF':RandomForestClassifier(bootstrap=True,max_depth=100,max_features=5,min_samples_leaf= 8,min_samples_split=8,n_estimators= 300),
+        'DT':DecisionTreeClassifier(max_depth=5, min_impurity_decrease= 0, min_samples_leaf=3, min_samples_split= 8),
+        'KNN':make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=30, leaf_size=10, p=1))}
+
+print('調參後:\n')
+for name in models:
+    model=models[name].fit(X_train, y_train)
+    y_pred=model.predict(X_test)
+    acc_rate=accuracy_score(y_test, y_pred)
+    mae=mean_absolute_error(y_test, y_pred)
+    mse=mean_squared_error(y_test, y_pred)
+    cm=confusion_matrix(y_test, y_pred)
+    print('\n=================={}==================='.format(name))
+    print('Accuracy Rate: ', acc_rate)
+    print('MAE: ', mae)
+    print('MSE: ', mse)
+    print('Confusion Matrix : \n', cm)
+
+
+knn_classifier = make_pipeline(StandardScaler(), KNeighborsClassifier(n_neighbors=30, leaf_size=10, p=1))
+knn_classifier.fit(X_train, y_train)
+y_pred_knn = knn_classifier.predict(X_test)
+
+ 
+svm_classifier = make_pipeline(StandardScaler(), SVC())
+svm_classifier.fit(X_train, y_train)  
+y_pred_svm = svm_classifier.predict(X_test)
+
+
+dt_classifier = DecisionTreeClassifier(max_depth=5, min_impurity_decrease= 0, min_samples_leaf=3, min_samples_split= 8)
+dt_classifier.fit(X_train, y_train)
+y_pred_dt = dt_classifier.predict(X_test)
+
+
+rf_classifier = RandomForestClassifier(bootstrap=True,max_depth=100,max_features=5,min_samples_leaf=8,min_samples_split= 8,n_estimators= 300)
+rf_classifier.fit(X_train, y_train)
+y_pred_rf = rf_classifier.predict(X_test)
+
+
+lr_classifier = make_pipeline(StandardScaler(), LogisticRegression(max_iter= 200, multi_class= 'ovr', solver= 'lbfgs'))
+lr_classifier.fit(X_train, y_train)
+y_pred_lr = lr_classifier.predict(X_test)
+
+
+nb_classifier = GaussianNB()
+nb_classifier.fit(X_train, y_train)
+y_pred_nb = nb_classifier.predict(X_test)
+
+
+total = len(y_test) 
+one_count = np.sum(y_test) 
+zero_count = total - one_count 
+lm_knn = [y for _, y in sorted(zip(y_pred_knn, y_test), reverse = True)] 
+lm_svm = [y for _, y in sorted(zip(y_pred_svm, y_test), reverse = True)] 
+lm_dt = [y for _, y in sorted(zip(y_pred_dt, y_test), reverse = True)]
+lm_rf = [y for _, y in sorted(zip(y_pred_rf, y_test), reverse = True)]
+lm_lr = [y for _, y in sorted(zip(y_pred_lr, y_test), reverse = True)] 
+lm_nb = [y for _, y in sorted(zip(y_pred_nb, y_test), reverse = True)] 
+
+x = np.arange(0, total + 1) 
+y_knn = np.append([0], np.cumsum(lm_knn)) 
+y_svm = np.append([0], np.cumsum(lm_svm)) 
+y_dt = np.append([0], np.cumsum(lm_dt)) 
+y_rf = np.append([0], np.cumsum(lm_rf)) 
+y_lr = np.append([0], np.cumsum(lm_lr)) 
+y_nb = np.append([0], np.cumsum(lm_nb)) 
+
+plt.figure(figsize = (10, 6)) 
+plt.plot([0, total], [0, one_count], c = 'b', linestyle = '--', label = 'Random Model')
+plt.plot([0, one_count, total], [0, one_count, one_count], c = 'grey', linewidth = 2, label = 'Perfect Model')
+plt.title('CAP Curve of Classifiers')
+plt.plot(x, y_knn, c = 'tab:blue', label = 'KNN classifier', linewidth = 2)
+plt.plot(x, y_svm, c = 'tab:orange', label = 'SVM classifier', linewidth = 2)
+plt.plot(x, y_dt, c = 'tab:green', label = 'DT classifier', linewidth = 2)
+plt.plot(x, y_rf, c = 'tab:red', label = 'RF classifier', linewidth = 2)
+plt.plot(x, y_lr, c = 'tab:brown', label = 'LR classifier', linewidth = 2)
+plt.plot(x, y_nb, c = 'tab:purple', label = 'NB classifier', linewidth = 2)
+
+plt.legend()
+plt.show()
+
+'''
+#調參
+param_grid1 = {
+ 'bootstrap': [True],
+ 'max_depth': [80, 100, 120, 50],
+ 'max_features': [2, 3, 5],
+ 'min_samples_leaf': [3, 5, 8],
+ 'min_samples_split': [8, 10, 12],
+ 'n_estimators': [100, 200, 300, 1000]
+} 
+
+rf = RandomForestRegressor()
+gs = GridSearchCV(estimator=rf, param_grid=param_grid1, cv=10, n_jobs=-1,verbose=2)
+gs.fit(X_train, y_train)
+gs.best_params_
+
+y_pred = model.predict(X_test)
+accu_rate = accuracy_score(y_test, y_pred)
+print(accu_rate)
+'''
